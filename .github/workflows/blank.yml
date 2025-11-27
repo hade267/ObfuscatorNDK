@@ -1,0 +1,89 @@
+name: Build Android NDK (Latest LLVM)
+
+on:
+  workflow_dispatch: # Cho phép chạy thủ công từ tab Actions
+
+jobs:
+  build-ndk:
+    name: Build LLVM Toolchain
+    runs-on: ubuntu-latest
+
+    # Build LLVM tốn rất nhiều thời gian, set timeout cao
+    timeout-minutes: 360 
+
+    steps:
+      # 1. Chuẩn bị mã nguồn Runner
+      - name: Checkout Workflow
+        uses: actions/checkout@v4
+
+      # 2. Giải phóng dung lượng ổ đĩa (Quan trọng vì build LLVM rất nặng)
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      # 3. Cài đặt các gói phụ thuộc (Tương tự bước 2 & 3 trong README)
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake bison ninja-build \
+          python3-dev python3-pip swig git curl libxml2-dev libncurses5-dev \
+          libedit-dev rsync
+
+      # 4. Cài đặt công cụ 'repo' của Google
+      - name: Install Google Repo Tool
+        run: |
+          mkdir -p ~/.bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          chmod a+x ~/.bin/repo
+          echo "$HOME/.bin" >> $GITHUB_PATH
+
+      # 5. Cấu hình Git (Cần thiết để repo sync hoạt động)
+      - name: Configure Git Identity
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git config --global color.ui auto
+
+      # 6. Khởi tạo Repo và Tải mã nguồn (Tương đương bước 5 trong README)
+      # Sử dụng nhánh 'llvm-toolchain' để lấy bản mới nhất
+      - name: Initialize and Sync Repo
+        run: |
+          mkdir llvm-toolchain
+          cd llvm-toolchain
+          repo init -u https://android.googlesource.com/platform/manifest -b llvm-toolchain --depth=1
+          repo sync -c -j$(nproc) --no-tags
+
+      # 7. (TÙY CHỌN) Áp dụng Patch Obfuscator
+      # Lưu ý: Bạn cần có file patch tương thích với LLVM mới nhất.
+      # Nếu code patch nằm trong repo hiện tại, bạn có thể copy vào.
+      - name: Apply Obfuscator Patches
+        run: |
+          echo "Applying patches..."
+          # Ví dụ: cp -r ./Obfuscation llvm-toolchain/toolchain/llvm-project/llvm/lib/Transforms/
+          # Đây là nơi bạn thực hiện bước 7 trong README của bạn
+
+      # 8. Thực hiện Build (Tương đương bước 6 & 8 trong README)
+      # Script build.py hiện đại thường nằm ở toolchain/llvm_android/build.py
+      - name: Build Toolchain
+        working-directory: llvm-toolchain
+        run: |
+          # Build cho Linux trước (để chạy trên Action), và có thể cross-compile Windows
+          python3 toolchain/llvm_android/build.py --no-build=windows
+          
+          # Nếu bạn muốn build cho Windows như README yêu cầu (cần kiểm tra script build.py mới nhất hỗ trợ flag nào):
+          # python3 toolchain/llvm_android/build.py --host windows
+
+      # 9. Nén và Upload kết quả
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ndk-llvm-toolchain
+          path: llvm-toolchain/out/install/
+          compression-level: 6
